@@ -473,25 +473,8 @@ plot_model(model, to_file=os.path.join(out_fold, 'model_plot.png'), show_shapes=
 with open(out_file, 'a') as f:
     model.summary(print_fn=lambda x: f.write(x + '\n'))
 
-'''
-class MyLRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
-  def __init__(self, curr_lr):
-    self.curr_lr = curr_lr
-  @tf.function
-  def __call__(self, step):
-    if (step+1) % decay == 0:
-        self.curr_lr = self.curr_lr * 0.97
-    return self.curr_lr
-  #def get_config(self):
-  #  config = {
-  #      'curr_lr': self.curr_lr
-  #  }
-  #  return config
-opt = tf.keras.optimizers.Adam(learning_rate=MyLRSchedule(curr_lr))
-'''
-
 opt = tf.keras.optimizers.Adam(learning_rate=curr_lr)
-model.compile(optimizer=opt, loss=losses.focal_tversky_loss(),
+model.compile(optimizer=opt, loss=losses.average_dice_coef_loss(),
               metrics=[losses.average_dice_coef])
 print('Model prepared...')
 
@@ -499,21 +482,6 @@ if os.path.exists(os.path.join(out_fold, 'model_weights.h5')):
     print('\nLoading saved weights...')
     model.load_weights(os.path.join(out_fold, 'model_weights.h5'))
 
-"""
-Define callbacks
-stopping = EarlyStopping(patience=16,verbose=1, monitor='val_dice_coef', mode='max')
-checkpoint = ModelCheckpoint(filepath='model_weight.h5',
-                             monitor='val_dice_coef',
-                             mode='max',
-                             save_best_only=True,
-                             verbose=1)
-def scheduler(epoch, lr):
-  if epoch == 0:
-    return lr
-  else:
-    return lr * 0.97
-callback = tf.keras.callbacks.LearningRateScheduler(scheduler, verbose=0)
-"""
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 TRAINING MODEL
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -601,34 +569,17 @@ for epoch in range(epochs):
         print('val_dice did not improve for %d epochs' % no_improvement_counter)
 
     # ReduceLROnPlateau
-
-    if no_improvement_counter % 8 == 0 and no_improvement_counter != 0:
-        curr_lr = curr_lr * 0.4
+    if no_improvement_counter % 10 == 0 and no_improvement_counter != 0:
+        curr_lr = curr_lr * 0.5
         if curr_lr < 5e-7:
             curr_lr = 1e-4
         K.set_value(model.optimizer.learning_rate, curr_lr)
         logging.info('Current learning rate: %.6f' % curr_lr)
 
-'''
-    if epoch <= 100:
-        curr_lr = 0.001 * math.exp(-0.06 * epoch)
-    if 100 < epoch <= 150:
-        curr_lr = 0.0005 * math.exp(-0.1 * (epoch-100))
-    if epoch > 150:
-        curr_lr = 0.0005 * math.exp(-0.1 * (epoch-150))
-'''
-'''
-    curr_lr = 0.001 * math.exp(-0.03 * epoch)
-    K.set_value(model.optimizer.learning_rate, curr_lr)
-    logging.info('Current learning rate: %.6f' % curr_lr)
-'''
-
     # EarlyStopping
-
     if no_improvement_counter > 40:  # Early stop if val loss does not improve after n epochs
         logging.info('Early stop at epoch {}.\n'.format(str(epoch + 1)))
         break
-
 
 print('\nModel correctly trained and saved')
 
