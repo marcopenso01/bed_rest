@@ -447,8 +447,8 @@ for i in range(len(val_img)):
     val_down[i] = normalize_image(val_down[i])
 
 # only for softmax
-mask_train = tf.keras.utils.to_categorical(mask_train, num_classes=3)
-mask_val = tf.keras.utils.to_categorical(mask_val, num_classes=3)
+mask_train = tf.keras.utils.to_categorical(mask_train, num_classes=4)
+mask_val = tf.keras.utils.to_categorical(mask_val, num_classes=4)
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 HYPERPARAMETERS
@@ -467,7 +467,7 @@ print_txt(out_fold, ['\ncurr_lr: %s\n\n' % curr_lr])
 LOADING MODEL
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 print('\nCreating and compiling model...')
-model = model_structure.ConvMixUnet2_5D_3(n_filt2D=48, n_fild3D=32)
+model = model_structure.ConvMixUnet2_5D_3(n_filt=32)
 plot_model(model, to_file=os.path.join(out_fold, 'model_plot.png'), show_shapes=True, show_layer_names=True)
 
 with open(out_file, 'a') as f:
@@ -620,6 +620,7 @@ plt.ylabel("LR", fontsize=16)
 plt.savefig(os.path.join(out_fold, 'LR'), dpi=300)
 plt.close()
 
+'''
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 TESTING AND EVALUATING THE MODEL
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -721,3 +722,4 @@ print_txt(out_fold, ['\nAverage time per volume: %f' % (total_time / total_volum
 
 if gt_exists:
     metrics.main(test_path)
+'''
