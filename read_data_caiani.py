@@ -17,6 +17,7 @@ def makefolder(folder):
         return True
     return False
 
+#legge i dati del bed-rest di Caiani
 input_folder = r'F:/Caiani_bed_rest/paz1'
 output_folder = r'F:/Caiani_bed_rest/pre_process'
 
