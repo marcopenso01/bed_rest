@@ -4,23 +4,24 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 # The GPU id to use, usually either "0" or "1"
 # for GPU process:
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+# for CPU process:
+# os.environ["CUDA_VISIBLE_DEVICES"] =
 
 import numpy as np
 import h5py
-import skimage.io as io
-import skimage.transform as trans
+# import skimage.io as io
+# import skimage.transform as trans
 import matplotlib.pyplot as plt
 from scipy import ndimage
 import shutil
 import time
-import math
 import tensorflow as tf
 from tensorflow.keras import backend as K
 from tensorflow.keras.utils import plot_model
 import logging
 import model_structure
 import losses
-import metrics
+#import metrics
 from tensorflow.python.client import device_lib
 
 logging.basicConfig(
@@ -28,6 +29,7 @@ logging.basicConfig(
 )
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 assert 'GPU' in str(device_lib.list_local_devices())
 print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 print('is_gpu_available: %s' % tf.test.is_gpu_available())  # True/False
@@ -35,8 +37,6 @@ print('is_gpu_available: %s' % tf.test.is_gpu_available())  # True/False
 print('gpu with cuda support: %s' % tf.test.is_gpu_available(cuda_only=True))
 strategy = tf.distribute.MirroredStrategy()
 print('Number of devices: {}'.format(strategy.num_replicas_in_sync))
-
-
 # tf.config.list_physical_devices('GPU') #The above function is deprecated in tensorflow > 2.1
 
 def standardize_image(image):
@@ -115,9 +115,8 @@ def transform_matrix_offset_center(matrix, x, y):
     return transform_matrix
 
 
-def apply_affine_transform(img1, img2, img3, lbl, rows, cols,
-                           theta=0, tx=0, ty=0, zx=1, zy=1,
-                           fill_mode='nearest', order=1):
+def apply_affine_transform(img, lbl, rows, cols, theta=0, tx=0, ty=0,
+                           zx=1, zy=1, fill_mode='nearest', order=1):
     '''
     Applies an affine transformation specified by the parameters given.
     :param img: A numpy array of shape [x, y, nchannels]
@@ -148,6 +147,15 @@ def apply_affine_transform(img1, img2, img3, lbl, rows, cols,
         else:
             transform_matrix = np.dot(transform_matrix, shift_matrix)
 
+    if zx != 1 or zy != 1:
+        zoom_matrix = np.array([[zx, 0, 0],
+                                [0, zy, 0],
+                                [0, 0, 1]])
+        if transform_matrix is None:
+            transform_matrix = zoom_matrix
+        else:
+            transform_matrix = np.dot(transform_matrix, zoom_matrix)
+
     if transform_matrix is not None:
         transform_matrix = transform_matrix_offset_center(
             transform_matrix, rows, cols)
@@ -155,31 +163,13 @@ def apply_affine_transform(img1, img2, img3, lbl, rows, cols,
         final_offset = transform_matrix[:2, 2]
 
         channel_images = [ndimage.interpolation.affine_transform(
-            img1[:, :, channel],
+            img[:, :, channel],
             final_affine_matrix,
             final_offset,
             order=order,
             mode=fill_mode,
-            cval=0.0) for channel in range(img1.shape[-1])]
-        img1 = np.stack(channel_images, axis=2)
-
-        channel_images = [ndimage.interpolation.affine_transform(
-            img2[:, :, channel],
-            final_affine_matrix,
-            final_offset,
-            order=order,
-            mode=fill_mode,
-            cval=0.0) for channel in range(img2.shape[-1])]
-        img2 = np.stack(channel_images, axis=2)
-
-        channel_images = [ndimage.interpolation.affine_transform(
-            img3[:, :, channel],
-            final_affine_matrix,
-            final_offset,
-            order=order,
-            mode=fill_mode,
-            cval=0.0) for channel in range(img3.shape[-1])]
-        img3 = np.stack(channel_images, axis=2)
+            cval=0.0) for channel in range(img.shape[-1])]
+        img = np.stack(channel_images, axis=2)
 
         channel_images = [ndimage.interpolation.affine_transform(
             lbl[:, :, channel],
@@ -190,33 +180,28 @@ def apply_affine_transform(img1, img2, img3, lbl, rows, cols,
             cval=0.0) for channel in range(lbl.shape[-1])]
         lbl = np.stack(channel_images, axis=2)
 
-    return img1, img2, img3, lbl
+    return img, lbl
 
 
-def augmentation_function(image1, image2, image3, labels):
+def augmentation_function(images, labels):
     '''
     Function for augmentation of minibatches.
     :param images: A numpy array of shape [minibatch, X, Y, nchannels]
     :param labels: A numpy array containing a corresponding label mask
-    :return: A mini batch of the same size but with transformed images and masks. 
+    :return: A mini batch of the same size but with transformed images and masks.
     '''
-
-    if image1.ndim > 4:
+    if images.ndim > 4:
         raise AssertionError('Augmentation will only work with 2D images')
 
-    new_images1 = []
-    new_images2 = []
-    new_images3 = []
+    new_images = []
     new_labels = []
-    num_images = image1.shape[0]
-    rows = image1.shape[1]
-    cols = image1.shape[2]
+    num_images = images.shape[0]
+    rows = images.shape[1]
+    cols = images.shape[2]
 
     for ii in range(num_images):
 
-        img1 = image1[ii, ...]
-        img2 = image2[ii, ...]
-        img3 = image3[ii, ...]
+        img = images[ii, ...]
         lbl = labels[ii, ...]
 
         # ROTATE
@@ -248,9 +233,9 @@ def augmentation_function(image1, image2, image3, labels):
             raise ValueError("do_height_shift_range parameter should be >0")
 
         # ZOOM
-        # Float or [lower, upper].Range for random zoom.
-        # If a float, `[lower, upper] = [1 - zoom_range, 1 + zoom_range]`
-        zx, zy = np.random.uniform(1 - 0.05, 1 + 0.05, 2)
+        #Float or [lower, upper].Range for random zoom.
+        #If a float, `[lower, upper] = [1 - zoom_range, 1 + zoom_range]`
+        zx, zy = np.random.uniform(1-0.05, 1+0.05, 2)
 
         # RANDOM HORIZONTAL FLIP
         flip_horizontal = (np.random.random() < 0.5)
@@ -258,41 +243,32 @@ def augmentation_function(image1, image2, image3, labels):
         # RANDOM VERTICAL FLIP
         flip_vertical = (np.random.random() < 0.5)
 
-        img1, img2, img3, lbl = apply_affine_transform(img1, img2, img3, lbl,
-                                                       rows=rows, cols=cols,
-                                                       theta=theta, tx=tx, ty=ty,
-                                                       zx=zx, zy=zy,
-                                                       fill_mode='nearest',
-                                                       order=1)
+        img, lbl = apply_affine_transform(img, lbl, rows=rows, cols=cols,
+                                          theta=theta, tx=tx, ty=ty,
+                                          zx=zx, zy=zy,
+                                          fill_mode='nearest',
+                                          order=1)
 
         if flip_horizontal:
-            img1 = flip_axis(img1, 1)
-            img2 = flip_axis(img2, 1)
-            img3 = flip_axis(img3, 1)
+            img = flip_axis(img, 1)
             lbl = flip_axis(lbl, 1)
 
         if flip_vertical:
-            img1 = flip_axis(img1, 0)
-            img2 = flip_axis(img2, 0)
-            img3 = flip_axis(img3, 0)
+            img = flip_axis(img, 0)
             lbl = flip_axis(lbl, 0)
 
-        new_images1.append(img1)
-        new_images2.append(img2)
-        new_images3.append(img3)
+        new_images.append(img)
         new_labels.append(lbl)
 
-    sampled_image1_batch = np.asarray(new_images1)
-    sampled_image2_batch = np.asarray(new_images2)
-    sampled_image3_batch = np.asarray(new_images3)
+    sampled_image_batch = np.asarray(new_images)
     sampled_label_batch = np.asarray(new_labels)
 
-    return sampled_image1_batch, sampled_image2_batch, sampled_image3_batch, sampled_label_batch
+    return sampled_image_batch, sampled_label_batch
 
 
-def iterate_minibatches(image1, image2, image3, labels, batch_size, augment_batch=False, expand_dims=True):
+def iterate_minibatches(images, labels, batch_size, augment_batch=False, expand_dims=True):
     '''
-    Function to create mini batches from the dataset of a certain batch size 
+    Function to create mini batches from the dataset of a certain batch size
     :param images: input data shape (N, W, H)
     :param labels: label data
     :param batch_size: batch size (Int)
@@ -300,60 +276,53 @@ def iterate_minibatches(image1, image2, image3, labels, batch_size, augment_batc
     :param expand_dims: adding a dimension, Boolean (default: True)
     :return: mini batches
     '''
-    random_indices = np.arange(image1.shape[0])
+    random_indices = np.arange(images.shape[0])
     np.random.shuffle(random_indices)
-    n_images = image1.shape[0]
+    n_images = images.shape[0]
     for b_i in range(0, n_images, batch_size):
 
         if b_i + batch_size > n_images:
             continue
 
         batch_indices = np.sort(random_indices[b_i:b_i + batch_size])
-        X1 = image1[batch_indices, ...]  # array of shape [minibatch, X, Y]
-        X2 = image2[batch_indices, ...]
-        X3 = image3[batch_indices, ...]
+        X = images[batch_indices, ...]
         y = labels[batch_indices, ...]
 
         if expand_dims:
-            X1 = X1[..., np.newaxis]  # array of shape [minibatch, X, Y, nchannels=1]
-            X2 = X2[..., np.newaxis]
-            X3 = X3[..., np.newaxis]
-            y = y[..., np.newaxis]
-
+            X = X[..., np.newaxis]  # array of shape [minibatch, X, Y, nchannels]
+            #y = y[..., np.newaxis]
         if augment_batch:
-            X1, X2, X3, y = augmentation_function(X1, X2, X3, y)
+            X, y = augmentation_function(X, y)
 
-        yield X1, X2, X3, y
+        yield X, y
 
 
-def do_eval(image1, image2, image3, labels, batch_size, augment_batch=False, expand_dims=True):
+def do_eval(images, labels, batch_size, augment_batch=False, expand_dims=True):
     '''
-    Function for running the evaluations on the validation sets.  
+    Function for running the evaluations on the validation sets.
     :param images: A numpy array containing the images
-    :param labels: A numpy array containing the corresponding labels 
+    :param labels: A numpy array containing the corresponding labels
     :param batch_size: batch size
     :param augment_batch: should batch be augmented?
-    :param expand_dims: adding a dimension to a tensor? 
+    :param expand_dims: adding a dimension to a tensor?
     :return: Scalar val loss and metrics
     '''
     num_batches = 0
     history = []
-    for batch in iterate_minibatches(image1,
-                                     image2,
-                                     image3,
+    for batch in iterate_minibatches(images,
                                      labels,
-                                     batch_size=batch_size,
-                                     augment_batch=augment_batch,
-                                     expand_dims=expand_dims):
-        x1, x2, x3, y = batch
+                                     batch_size,
+                                     augment_batch,
+                                     expand_dims):
+        x, y = batch
         if y.shape[0] < batch_size:
             continue
 
-        val_hist = model.test_on_batch((x1, x2, x3), y)
+        val_hist = model.test_on_batch(x, y)
         if history == []:
             history.append(val_hist)
         else:
-            history[0] = [i + j for i, j in zip(history[0], val_hist)]
+            history[0] = [x + y for x, y in zip(history[0], val_hist)]
         num_batches += 1
 
     for i in range(len(history[0])):
@@ -367,11 +336,13 @@ def print_txt(output_dir, stringa):
     with open(out_file, "a") as text_file:
         text_file.writelines(stringa)
 
+
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 PATH
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 log_root = 'D:\BED_REST\logdir'
-experiment_name = 'model1'
+experiment_name = 'model4'
+data_path = 'D:\BED_REST\data'
 forceoverwrite = True
 
 out_fold = os.path.join(log_root, experiment_name)
@@ -394,68 +365,52 @@ print_txt(out_fold, ['\nExperiment_name %s' % experiment_name])
 LOAD DATA
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 logging.info('\nLoading data...')
-data = h5py.File(os.path.join('D:\BED_REST\data', 'train.hdf5'), 'r')
+data = h5py.File(os.path.join(data_path, 'train.hdf5'), 'r')
 train_img = data['img_raw'][()].astype('float32')
 train_label = data['mask'][()].astype('float32')
-train_up = data['img_up'][()].astype('float32')
-train_down = data['img_down'][()].astype('float32')
-# train_left = data['img_left'][()].astype('float32')
-# train_right = data['img_right'][()].astype('float32')
 data.close()
 
-data = h5py.File(os.path.join('D:\BED_REST\data', 'val.hdf5'), 'r')
+data = h5py.File(os.path.join(data_path, 'val.hdf5'), 'r')
 val_img = data['img_raw'][()].astype('float32')
 val_label = data['mask'][()].astype('float32')
-val_up = data['img_up'][()].astype('float32')
-val_down = data['img_down'][()].astype('float32')
-# val_left = data['img_left'][()].astype('float32')
-# val_right = data['img_right'][()].astype('float32')
 data.close()
 
 with open(out_file, "a") as text_file:
     text_file.write('\n----- Data summary -----')
 print_txt(out_fold, ['\nTraining Images size: %s %s %s' % (train_img.shape[0], train_img.shape[1], train_img.shape[2])])
-print_txt(out_fold, ['\nTraining Images type: %s' % train_img.dtype])
-print_txt(out_fold, ['\nTraining Up-Images size: %s %s %s' % (train_up.shape[0], train_up.shape[1], train_up.shape[2])])
-print_txt(out_fold, ['\nTraining Up-Images type: %s' % train_up.dtype])
-print_txt(out_fold,
-          ['\nTraining Down-Images size: %s %s %s' % (train_down.shape[0], train_down.shape[1], train_down.shape[2])])
-print_txt(out_fold, ['\nTraining Down-Images type: %s' % train_down.dtype])
+print_txt(out_fold, ['\nTraining Images shape: %s' % train_img.dtype])
 print_txt(out_fold, ['\nValidation Images size: %s %s %s' % (val_img.shape[0], val_img.shape[1], val_img.shape[2])])
-print_txt(out_fold, ['\nValidation Images type: %s' % val_img.dtype])
-print_txt(out_fold, ['\nValidation Up-Images size: %s %s %s' % (val_up.shape[0], val_up.shape[1], val_up.shape[2])])
-print_txt(out_fold, ['\nValidation Up-Images type: %s' % val_up.dtype])
-print_txt(out_fold,
-          ['\nValidation Down-Images size: %s %s %s' % (val_down.shape[0], val_down.shape[1], val_down.shape[2])])
-print_txt(out_fold, ['\nValidation Down-Images type: %s' % val_down.dtype])
+print_txt(out_fold, ['\nValidation Images shape: %s' % val_img.dtype])
 
-if len(train_img) != len(train_up) or len(train_img) != len(train_down) or len(train_img) != len(train_label):
-    raise AssertionError('Inadequate number of training images')
-if len(val_img) != len(val_up) or len(val_img) != len(val_down) or len(val_img) != len(val_label):
-    raise AssertionError('Inadequate number of validation images')
+if len(train_img) != len(train_label):
+    raise Exception(
+        'ERROR number of file is not equal in train (%s) and labels (%s)' % (len(train_img), len(train_label)))
+if len(val_img) != len(val_label):
+    raise Exception('ERROR number of file is not equal in train (%s) and labels (%s)' % (len(val_img), len(val_label)))
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 NORMALIZATION
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 for i in range(len(train_img)):
     train_img[i] = normalize_image(train_img[i])
-    train_up[i] = normalize_image(train_up[i])
-    train_down[i] = normalize_image(train_down[i])
 for i in range(len(val_img)):
     val_img[i] = normalize_image(val_img[i])
-    val_up[i] = normalize_image(val_up[i])
-    val_down[i] = normalize_image(val_down[i])
+
+train_img = train_img.astype('float32')
+train_label = train_label.astype('float32')
+val_img = val_img.astype('float32')
+val_label = val_label.astype('float32')
 
 # only for softmax
-mask_train = tf.keras.utils.to_categorical(mask_train, num_classes=4)
-mask_val = tf.keras.utils.to_categorical(mask_val, num_classes=4)
-
+train_label = tf.keras.utils.to_categorical(train_label, num_classes=4)
+val_label = tf.keras.utils.to_categorical(val_label, num_classes=4)
+print('train_label', train_label.shape)
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 HYPERPARAMETERS
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 batch_size = 4
-epochs = 300
-curr_lr = 1e-4
+epochs = 400
+curr_lr = 0.0001
 
 with open(out_file, "a") as text_file:
     text_file.write('\n----- HYPERPARAMETERS -----')
@@ -467,25 +422,29 @@ print_txt(out_fold, ['\ncurr_lr: %s\n\n' % curr_lr])
 LOADING MODEL
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 print('\nCreating and compiling model...')
-model = model_structure.ConvMixUnet2_5D_3(n_filt=32)
+#model = model_structure.Unet(n_filt=64)
+model = model_structure.ConvMixSkipUnet(n_filt=64)
 plot_model(model, to_file=os.path.join(out_fold, 'model_plot.png'), show_shapes=True, show_layer_names=True)
 
 with open(out_file, 'a') as f:
     model.summary(print_fn=lambda x: f.write(x + '\n'))
+# plot_model(model, to_file=os.path.join(log_dir,'model_plot.png'), show_shapes=True, show_layer_names=True)
 
 opt = tf.keras.optimizers.Adam(learning_rate=curr_lr)
-model.compile(optimizer=opt, loss=losses.average_dice_coef_loss(),
-              metrics=[losses.average_dice_coef])
+model.compile(optimizer=opt, loss=losses.combo_loss(), metrics=[losses.average_dice_coef])
 print('Model prepared...')
 
 if os.path.exists(os.path.join(out_fold, 'model_weights.h5')):
     print('\nLoading saved weights...')
     model.load_weights(os.path.join(out_fold, 'model_weights.h5'))
+else:
+    print('\nNot founded saved weights...')
+    print('Training from scratch...')
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 TRAINING MODEL
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-print('Start training...')
+print('\nStart training...')
 
 best_val_loss = float('inf')
 best_val_dice = float(0)
@@ -500,19 +459,17 @@ for epoch in range(epochs):
     print('Epoch %d/%d' % (epoch + 1, epochs))
     temp_hist = {}
     for batch in iterate_minibatches(train_img,
-                                     train_up,
-                                     train_down,
                                      train_label,
                                      batch_size=batch_size,
                                      augment_batch=True,
                                      expand_dims=True):
-        x1, x2, x3, y = batch
+        x, y = batch
         # TEMPORARY HACK (to avoid incomplete batches)
         if y.shape[0] < batch_size:
             step += 1
             continue
 
-        hist = model.train_on_batch((x1, x2, x3), y)
+        hist = model.train_on_batch(x, y)
         if temp_hist == {}:
             for m_i in range(len(model.metrics_names)):
                 temp_hist[model.metrics_names[m_i]] = []
@@ -524,6 +481,7 @@ for epoch in range(epochs):
                   (step + 1, model.metrics_names[0], hist[0], model.metrics_names[1], hist[1]))
 
         step += 1  # fine batch
+
     # end epoch
     for key in temp_hist:
         temp_hist[key] = sum(temp_hist[key]) / len(temp_hist[key])
@@ -539,14 +497,11 @@ for epoch in range(epochs):
         train_history[key].append(temp_hist[key])
 
     # save learning rate history
-    lr_hist.append(K.get_value(model.optimizer.learning_rate))
+    lr_hist.append(curr_lr)
 
     # evaluate the model against the validation set
     logging.info('Validation Data Eval:')
-    val_hist = do_eval(val_img,
-                       val_up,
-                       val_down,
-                       val_label,
+    val_hist = do_eval(val_img, val_label,
                        batch_size=batch_size,
                        augment_batch=False,
                        expand_dims=True)
@@ -564,162 +519,60 @@ for epoch in range(epochs):
             best_val_dice, val_hist[1]))
         best_val_dice = val_hist[1]
         model.save(os.path.join(out_fold, 'model_weights.h5'))
+        # model.save_weights(os.path.join(log_dir, 'model_weights.h5'))
     else:
         no_improvement_counter += 1
         print('val_dice did not improve for %d epochs' % no_improvement_counter)
 
     # ReduceLROnPlateau
-    if no_improvement_counter % 10 == 0 and no_improvement_counter != 0:
-        curr_lr = curr_lr * 0.5
+    if no_improvement_counter % 6 == 0 and no_improvement_counter != 0:
+        curr_lr = curr_lr * 0.2
         if curr_lr < 5e-7:
             curr_lr = 1e-4
         K.set_value(model.optimizer.learning_rate, curr_lr)
         logging.info('Current learning rate: %.6f' % curr_lr)
 
     # EarlyStopping
-    if no_improvement_counter > 40:  # Early stop if val loss does not improve after n epochs
+    if no_improvement_counter > 30:  # Early stop if val loss does not improve after n epochs
         logging.info('Early stop at epoch {}.\n'.format(str(epoch + 1)))
         break
 
+    if epoch % 10 == 0 and epoch != 0:
+        # plot history (loss and metrics)
+        plt.figure(figsize=(8, 8))
+        plt.grid(False)
+        plt.title("Learning curve LOSS", fontsize=20)
+        plt.plot(train_history["loss"], label="Train loss")
+        plt.plot(val_history["loss"], label="Val loss")
+        p = np.argmin(val_history["loss"])
+        plt.plot(p, val_history["loss"][p], marker="x", color="r", label="best model")
+        plt.xlabel("Epochs", fontsize=16)
+        plt.ylabel("Loss", fontsize=16)
+        plt.legend();
+        plt.savefig(os.path.join(out_fold, 'Loss'), dpi=300)
+        plt.close()
+
+        plt.figure(figsize=(8, 8))
+        plt.grid(False)
+        plt.title("Dice Coefficient", fontsize=20)
+        plt.plot(train_history["average_dice_coef"], label="Train dice")
+        plt.plot(val_history["average_dice_coef"], label="Val dice")
+        p = np.argmax(val_history["average_dice_coef"])
+        plt.plot(p, val_history["average_dice_coef"][p], marker="x", color="r", label="best model")
+        plt.xlabel("Epochs", fontsize=16)
+        plt.ylabel("Dice", fontsize=16)
+        plt.legend();
+        plt.savefig(os.path.join(out_fold, 'dice_coef'), dpi=300)
+        plt.close()
+
+        # plot learning rate
+        plt.figure(figsize=(8, 8))
+        plt.grid(False)
+        plt.title("Model learning rate", fontsize=20)
+        plt.plot(lr_hist)
+        plt.xlabel("Epochs", fontsize=16)
+        plt.ylabel("LR", fontsize=16)
+        plt.savefig(os.path.join(out_fold, 'LR'), dpi=300)
+        plt.close()
+
 print('\nModel correctly trained and saved')
-
-# plot history (loss and metrics)
-plt.figure(figsize=(8, 8))
-plt.grid(False)
-plt.title("Learning curve LOSS", fontsize=20)
-plt.plot(train_history["loss"], label="Train loss")
-plt.plot(val_history["loss"], label="Val loss")
-p = np.argmin(val_history["loss"])
-plt.plot(p, val_history["loss"][p], marker="x", color="r", label="best model")
-plt.xlabel("Epochs", fontsize=16)
-plt.ylabel("Loss", fontsize=16)
-plt.legend();
-plt.savefig(os.path.join(out_fold, 'Loss'), dpi=300)
-plt.close()
-
-plt.figure(figsize=(8, 8))
-plt.grid(False)
-plt.title("Dice Coefficient", fontsize=20)
-plt.plot(train_history["dice_coef"], label="Train dice")
-plt.plot(val_history["dice_coef"], label="Val dice")
-p = np.argmax(val_history["dice_coef"])
-plt.plot(p, val_history["dice_coef"][p], marker="x", color="r", label="best model")
-plt.xlabel("Epochs", fontsize=16)
-plt.ylabel("Dice", fontsize=16)
-plt.legend();
-plt.savefig(os.path.join(out_fold, 'dice_coef'), dpi=300)
-plt.close()
-
-# plot learning rate
-plt.figure(figsize=(8, 8))
-plt.grid(False)
-plt.title("Model learning rate", fontsize=20)
-plt.plot(lr_hist)
-plt.xlabel("Epochs", fontsize=16)
-plt.ylabel("LR", fontsize=16)
-plt.savefig(os.path.join(out_fold, 'LR'), dpi=300)
-plt.close()
-
-'''
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-TESTING AND EVALUATING THE MODEL
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-print('-' * 50)
-print('Testing...')
-print('-' * 50)
-gt_exists = 'True'
-test_path = os.path.join(out_fold, 'predictions')
-
-if not tf.io.gfile.exists(test_path):
-    tf.io.gfile.makedirs(test_path)
-data_file_path = os.path.join(test_path, 'pred.hdf5')
-out_pred_data = h5py.File(data_file_path, "w")
-
-data = h5py.File(os.path.join('D:\GRASSO\data', 'test2.hdf5'), 'r')
-test_img = data['img_raw'][()].astype('float32')
-test_up = data['img_up'][()].astype('float32')
-test_down = data['img_down'][()].astype('float32')
-test_label = data['mask'][()].astype('float32')
-test_paz = data['paz'][()]
-test_px = data['pixel_size'][()]
-data.close()
-
-with open(out_file, "a") as text_file:
-    text_file.write('\n----- test Data summary -----')
-print_txt(out_fold, ['\nTesting Images size: %s %s %s' % (test_img.shape[0], test_img.shape[1], test_img.shape[2])])
-print_txt(out_fold, ['\nTesting Images type: %s' % test_img.dtype])
-print_txt(out_fold, ['\nTesting Up-Images size: %s %s %s' % (test_up.shape[0], test_up.shape[1], test_up.shape[2])])
-print_txt(out_fold, ['\nTesting Up-Images type: %s' % test_up.dtype])
-print_txt(out_fold,
-          ['\nTesting Down-Images size: %s %s %s' % (test_down.shape[0], test_down.shape[1], test_down.shape[2])])
-print_txt(out_fold, ['\nTesting Down-Images type: %s' % test_down.dtype])
-
-print('Loading saved weights...')
-model = tf.keras.models.load_model(os.path.join(out_fold, 'model_weights.h5'),
-                                   custom_objects={'loss_function': losses.focal_tversky_loss(),
-                                                   'dice_coef': losses.dice_coef})
-
-RAW = []
-PRED = []
-PAZ = []
-MASK = []
-PIXEL = []
-
-total_time = 0
-total_volumes = 0
-
-for paz in np.unique(test_paz):
-    start_time = time.time()
-    logging.info(' --------------------------------------------')
-    logging.info('------- Analysing paz: %s' % paz)
-    logging.info(' --------------------------------------------')
-
-    for ii in np.where(test_paz == paz)[0]:
-        img = test_img[ii]
-        img_up = test_up[ii]
-        img_down = test_down[ii]
-        RAW.append(img)
-        PAZ.append(paz)
-        PIXEL.append(test_px[ii])
-        if gt_exists:
-            MASK.append(test_label[ii])
-
-        img = np.float32(normalize_image(img))
-        img_up = np.float32(normalize_image(img_up))
-        img_down = np.float32(normalize_image(img_down))
-        x1 = np.reshape(img, (1, img.shape[0], img.shape[1], 1))
-        x2 = np.reshape(img_up, (1, img_up.shape[0], img_up.shape[1], 1))
-        x3 = np.reshape(img_down, (1, img_down.shape[0], img_down.shape[1], 1))
-        mask_out = model.predict((x1, x2, x3))
-        mask_out = np.squeeze(mask_out)
-        PRED.append(mask_out)
-    elapsed_time = time.time() - start_time
-    total_time += elapsed_time
-    total_volumes += 1
-    logging.info('Evaluation of volume took %f secs.' % elapsed_time)
-    print_txt(out_fold, ['\nEvaluation of volume took %f secs.' % elapsed_time])
-
-n_file = len(PRED)
-dt = h5py.special_dtype(vlen=str)
-out_pred_data.create_dataset('img_raw', [n_file] + [160, 160], dtype=np.float32)
-out_pred_data.create_dataset('pred', [n_file] + [160, 160], dtype=np.uint8)
-out_pred_data.create_dataset('pixel_size', (n_file, 3), dtype=dt)
-out_pred_data.create_dataset('paz', (n_file,), dtype=dt)
-if gt_exists:
-    out_pred_data.create_dataset('mask', [n_file] + [160, 160], dtype=np.uint8)
-
-for i in range(n_file):
-    out_pred_data['img_raw'][i, ...] = RAW[i]
-    out_pred_data['pred'][i, ...] = PRED[i]
-    out_pred_data['paz'][i, ...] = PAZ[i]
-    out_pred_data['pixel_size'][i, ...] = PIXEL[i]
-    if gt_exists:
-        out_pred_data['mask'][i, ...] = MASK[i]
-
-out_pred_data.close()
-logging.info('Average time per volume: %f' % (total_time / total_volumes))
-print_txt(out_fold, ['\nAverage time per volume: %f' % (total_time / total_volumes)])
-
-if gt_exists:
-    metrics.main(test_path)
-'''
