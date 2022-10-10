@@ -371,7 +371,7 @@ def print_txt(output_dir, stringa):
 PATH
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 log_root = 'D:\BED_REST\logdir'
-experiment_name = 'model5'
+experiment_name = 'model7'
 data_path = 'D:\BED_REST\data'
 forceoverwrite = True
 
@@ -468,7 +468,7 @@ print_txt(out_fold, ['\ncurr_lr: %s\n\n' % curr_lr])
 LOADING MODEL
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 print('\nCreating and compiling model...')
-model = model_structure.Unet3d(n_filt=48)
+model = model_structure.AttUnet3d(n_filt=64)
 plot_model(model, to_file=os.path.join(out_fold, 'model_plot.png'), show_shapes=True, show_layer_names=True)
 
 with open(out_file, 'a') as f:
