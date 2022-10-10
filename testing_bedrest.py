@@ -68,7 +68,59 @@ def print_txt(output_dir, stringa):
     out_file = os.path.join(output_dir, 'summary_report.txt')
     with open(out_file, "a") as text_file:
         text_file.writelines(stringa)
+        
+        
+def compute_metrics_on_directories_raw(input_fold):
+    '''
+    - Predicted volume
+    :return: Pandas dataframe with all measures in a row for each prediction and each structure
+    '''
+    out_file['img_raw'][i, ...] = test_img[i]
+    out_file['pred'][i, ...] = test_pred[i]
+    out_file['paz'][i, ...] = test_paz[i]
+    out_file['phase'][i, ...] = test_phase[i]
+    out_file['pixel_size'][...] = px_dim
+    
+    data = h5py.File(input_fold, 'r')
 
+    cardiac_phase = []
+    file_names = []
+    structure_names = []
+
+    # measures per structure:
+    vol_list = []
+
+    structures_dict = {1: 'RV', 2: 'Myo', 3: 'LV'}
+    
+    paz = data['paz'][0]
+    for ph in np.unique(data['phase'][:]):
+        ind = np.where(data['phase'][:] == ph)
+        
+        pred_arr = []  # predizione del modello
+
+        for i in range(len(ind[0])):
+            pred_arr.append(data['pred'][ind[0][i]])
+
+        pred_arr = np.transpose(np.asarray(pred_arr, dtype=np.uint8), (1, 2, 0))
+
+        for struc in [3, 1, 2]:
+            pred_binary = (pred_arr == struc) * 1
+
+            # vol[ml] = n_pixel * (x_dim*y_dim) * z_dim / 1000
+            # 1 mm^3 = 0.001 ml
+            volpred = pred_binary.sum() * (data['pixel_size'][0][0] * data['pixel_size'][0][1]) * data['pixel_size'][0][2] / 1000.
+
+            vol_list.append(volpred)  # volume predetto CNN
+
+                
+            cardiac_phase.append(ph)
+            file_names.append(paz)
+            structure_names.append(structures_dict[struc])
+            
+    df = pd.DataFrame({'vol': vol_list, 'phase': cardiac_phase, 'struc': structure_names, 
+                       'filename': file_names})     
+    data.close()
+    return df
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 PATH
@@ -189,6 +241,7 @@ for paz in os.listdir(test_data_path):
     out_file.close()
     
     logging.info('\n ---------- computing metrics -------------')
-    
+    df = compute_metrics_on_directories_raw(os.path.join(out_path, paz, 'pred.hdf5'))
+    df.to_excel(os.path.join(out_path, paz, 'Excel_df.xlsx'))
 
 logging.info('Average time per volume: %f' % (total_time / total_volumes))
