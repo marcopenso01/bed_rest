@@ -20,8 +20,10 @@ from tensorflow.keras.utils import plot_model
 import logging
 import model_structure
 import losses
-#import metrics
+from skimage import exposure
 from tensorflow.python.client import device_lib
+import scipy.ndimage
+import random
 
 logging.basicConfig(
     level=logging.INFO  # allow DEBUG level messages to pass through the logger
@@ -224,7 +226,8 @@ def augmentation_function(image1, image2, image3, labels):
         theta = np.random.uniform(angles[0], angles[1])
 
         # RANDOM WIDTH SHIFT
-        width_rg = 0.05
+        #width_rg = 0.05
+        width_rg = 1
         if width_rg >= 1:
             ty = np.random.choice(int(width_rg))
             ty *= np.random.choice([-1, 1])
@@ -236,7 +239,8 @@ def augmentation_function(image1, image2, image3, labels):
             raise ValueError("do_width_shift_range parameter should be >0")
 
         # RANDOM HEIGHT SHIFT
-        height_rg = 0.05
+        #height_rg = 0.05
+        height_rg = 1
         if height_rg >= 1:
             tx = np.random.choice(int(height_rg))
             tx *= np.random.choice([-1, 1])
@@ -250,13 +254,19 @@ def augmentation_function(image1, image2, image3, labels):
         # ZOOM
         # Float or [lower, upper].Range for random zoom.
         # If a float, `[lower, upper] = [1 - zoom_range, 1 + zoom_range]`
-        zx, zy = np.random.uniform(1 - 0.05, 1 + 0.05, 2)
+        zx, zy = np.random.uniform(1 - 0.1, 1 + 0.05, 2)
 
         # RANDOM HORIZONTAL FLIP
         flip_horizontal = (np.random.random() < 0.5)
 
         # RANDOM VERTICAL FLIP
         flip_vertical = (np.random.random() < 0.5)
+
+        # RANDOM GAMMA CORRECTION
+        gamma = (np.random.random() < 0.5)
+
+        # RANDOM BLURR
+        blurr = (np.random.random() < 0.5)
 
         img1, img2, img3, lbl = apply_affine_transform(img1, img2, img3, lbl,
                                                        rows=rows, cols=cols,
@@ -276,6 +286,18 @@ def augmentation_function(image1, image2, image3, labels):
             img2 = flip_axis(img2, 0)
             img3 = flip_axis(img3, 0)
             lbl = flip_axis(lbl, 0)
+
+        if gamma:
+            gg = random.randrange(8, 13, 1)
+            img1 = exposure.adjust_gamma(img1, gg/10)
+            img2 = exposure.adjust_gamma(img2, gg/10)
+            img3 = exposure.adjust_gamma(img3, gg/10)
+
+        if blurr:
+            ss = random.randrange(6, 16, 2)
+            img1 = scipy.ndimage.gaussian_filter(img1, ss/10)
+            img2 = scipy.ndimage.gaussian_filter(img2, ss/10)
+            img3 = scipy.ndimage.gaussian_filter(img3, ss/10)
 
         new_images1.append(img1)
         new_images2.append(img2)
@@ -371,7 +393,7 @@ def print_txt(output_dir, stringa):
 PATH
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 log_root = 'D:\BED_REST\logdir'
-experiment_name = 'model7'
+experiment_name = 'model8'
 data_path = 'D:\BED_REST\data'
 forceoverwrite = True
 
@@ -456,7 +478,7 @@ HYPERPARAMETERS
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 batch_size = 4
 epochs = 400
-curr_lr = 1e-4
+curr_lr = 3e-4
 
 with open(out_file, "a") as text_file:
     text_file.write('\n----- HYPERPARAMETERS -----')
@@ -572,15 +594,13 @@ for epoch in range(epochs):
         print('val_dice did not improve for %d epochs' % no_improvement_counter)
 
     # ReduceLROnPlateau
-    if no_improvement_counter % 6 == 0 and no_improvement_counter != 0:
-        curr_lr = curr_lr * 0.2
-        if curr_lr < 5e-7:
-            curr_lr = 1e-4
+    if no_improvement_counter % 2 == 0 and no_improvement_counter != 0:
+        curr_lr = curr_lr * 0.95
         K.set_value(model.optimizer.learning_rate, curr_lr)
         logging.info('Current learning rate: %.6f' % curr_lr)
 
     # EarlyStopping
-    if no_improvement_counter > 30:  # Early stop if val loss does not improve after n epochs
+    if curr_lr < 1e-6:  # Early stop if val loss does not improve after n epochs
         logging.info('Early stop at epoch {}.\n'.format(str(epoch + 1)))
         break
 
