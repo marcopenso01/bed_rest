@@ -17,6 +17,12 @@ import model_structure
 import losses
 import metrics
 from tensorflow.python.client import device_lib
+import cv2
+import matplotlib.pyplot as plt
+from skimage import io, color
+from skimage import measure
+from matplotlib.backends.backend_pdf import PdfPages
+
 
 logging.basicConfig(
     level=logging.INFO  # allow DEBUG level messages to pass through the logger
@@ -69,12 +75,34 @@ def print_txt(output_dir, stringa):
     with open(out_file, "a") as text_file:
         text_file.writelines(stringa)
 
+def keep_largest_connected_components(mask):
+    '''
+    Keeps only the largest connected components of each label for a segmentation mask.
+    '''
+    vol = []
+    for struc in [1,2,3]:
+        img = (mask == struc)
+        if img.sum() == 0:
+            vol.append(img)
+        else:
+            out_img = np.zeros(mask.shape, dtype=np.uint8)
+            temp_img = np.zeros(img.shape, dtype=np.uint8)
+
+            blobs = measure.label(img, connectivity=1)  # find regions
+            props = measure.regionprops(blobs)
+            area = [ele.area for ele in props]  # area of each region
+            largest_blob_ind = np.argmax(area)
+            largest_blob_label = props[largest_blob_ind].label
+            temp_img[blobs == largest_blob_label] = 255
+            out_img[temp_img != 0] = struc
+            vol.append(out_img)
+    return sum(vol)
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 PATH
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 log_root = 'D:\BED_REST\logdir'
-experiment_name = 'model6'
+experiment_name = 'model7'
 test_data_path = 'G:\BED-REST\data_test'
 gt_exists = 'True'
 
@@ -146,7 +174,7 @@ for paz in os.listdir(test_data_path):
         mask_out = model.predict((x, x1, x2))
         mask_out = np.squeeze(mask_out)
         mask_out = np.argmax(mask_out, axis=-1)
-        PRED.append(mask_out)
+        PRED.append(keep_largest_connected_components(mask_out))
     elapsed_time = time.time() - start_time
     total_time += elapsed_time
     total_volumes += 1
@@ -181,3 +209,64 @@ logging.info('Average time per volume: %f' % (total_time / total_volumes))
 if gt_exists:
     logging.info('\n ---------- computing metrics -------------')
     metrics.main(out_path)
+
+print('saving images...')
+pdf_path = os.path.join(out_path,'plt_imgs.pdf')
+data = h5py.File(os.path.join(out_path,'pred.hdf5'), 'r')
+figs = []
+color = [(255, 0, 0), (0, 255, 0), (255, 255, 0)]
+for i in range(len(data['img_raw'])):
+    img = data['img_raw'][i]
+    img_o = cv2.normalize(src=img, dst=None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    img_mask = cv2.cvtColor(img_o, cv2.COLOR_GRAY2RGB)
+    img_pred = cv2.cvtColor(img_o, cv2.COLOR_GRAY2RGB)
+    for struc in [1, 2, 3]:
+        mask = data['mask'][i].astype(np.uint8)
+        pred = data['pred'][i].astype(np.uint8)
+
+        if struc == 1:
+            mask[mask != 1] = 0
+            pred[pred != 1] = 0
+        elif struc == 2:
+            mask[mask == 1] = 0
+            pred[pred == 1] = 0
+        elif struc == 3:
+            mask[mask != 3] = 0
+            pred[pred != 3] = 0
+
+        mask[mask != 0] = 1
+        pred[pred != 0] = 1
+
+        labels_mask = measure.label(mask)
+        regions = measure.regionprops(labels_mask)
+        regions.sort(key=lambda x: x.area, reverse=True)
+        if len(regions) > 1:
+            for rg in regions[1:]:
+                labels_mask[rg.coords[:, 0], rg.coords[:, 1]] = 0
+        labels_mask[labels_mask != 0] = 1
+        mask = labels_mask.astype(np.uint8)
+
+        contours_mask, _ = cv2.findContours(image=mask, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_NONE)
+        contours_pred, _ = cv2.findContours(image=pred, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_NONE)
+
+        cv2.drawContours(image=img_mask, contours=contours_mask, contourIdx=-1, color=color[struc - 1], thickness=1,
+                         lineType=cv2.LINE_AA)
+        cv2.drawContours(image=img_pred, contours=contours_pred, contourIdx=-1, color=color[struc - 1], thickness=1,
+                         lineType=cv2.LINE_AA)
+    fig = plt.figure(figsize=(14, 14))
+    ax1 = fig.add_subplot(121)
+    ax1.set_axis_off()
+    ax1.imshow(img_mask)
+    ax2 = fig.add_subplot(122)
+    ax2.set_axis_off()
+    ax2.imshow(img_pred)
+    ax1.title.set_text('Manual')
+    ax2.title.set_text('CNN')
+    figs.append(fig)
+    #plt.show()
+data.close()
+
+with PdfPages(pdf_path) as pdf:
+    for fig in figs:
+        pdf.savefig(fig)
+        plt.close()
