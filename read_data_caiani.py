@@ -1,3 +1,8 @@
+"""
+Created on Fri Oct 14 09:24:01 2022
+
+@author: mpenso
+"""
 import os
 import numpy as np
 import h5py
@@ -128,7 +133,7 @@ if __name__ == '__main__':
     nx = 160
     ny = 160
     force_overwrite = True
-    crop = 140
+    crop = 120
     #name fold paz da processare
     name = 'paz1'
     
@@ -170,17 +175,18 @@ if __name__ == '__main__':
                 slice_thick = float(data_row_img.SliceThickness)
                 flag = 0
     
-    pixel_size = [float(px_size[0]),
-                  float(px_size[1]),
+    pixel_size = [float(px_size[0] * (crop / nx)),
+                  float(px_size[1]* (crop / ny)),
                   float(slice_thick)
                  ]
+    print(pixel_size)
     
     #crop images
     print('selec center ROI')
     X = []
     Y = []
     while True:
-        img = data['phase10'][10]
+        img = data['phase10'][2]
         cv2.imshow("image", img.astype('uint8'))
         cv2.namedWindow('image')
         cv2.setMouseCallback("image", click_event)
@@ -207,7 +213,7 @@ if __name__ == '__main__':
     for k in data.keys():
         for i in range(len(data[k][:])):
             img = crop_or_pad_slice_to_size_specific_point(data[k][i], crop, crop, X[-1], Y[-1])
-            img = cv2.resize(img, (nx, ny), interpolation=cv2.INTER_AREA)
+            img = cv2.resize(img, (nx, ny), interpolation=cv2.INTER_CUBIC)
             hdf5_file[k][i, ...] = img
     
     # After loop:
