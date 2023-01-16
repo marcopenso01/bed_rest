@@ -186,3 +186,5 @@ elif struc == 3:
     
 else:
     raise AssertionError('Inadequate number of struc')
+
+data.close()
