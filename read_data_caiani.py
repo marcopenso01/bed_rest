@@ -218,3 +218,27 @@ if __name__ == '__main__':
     
     # After loop:
     hdf5_file.close()
+
+    
+    
+'''
+# change size pre_processed data
+path =r'F:/BED-REST/patientsESA20221202/patientsESA20221202/pre_process2'
+for paz in os.listdir(path):
+    print(paz)
+    path_paz = os.path.join(path, paz)
+    data = h5py.File(os.path.join(path_paz, 'data.hdf5'), 'r+')
+    for k in data.keys():
+        if k == 'pixel_size':
+            pixel_size = [float(float(data['pixel_size'][0][0]) * (120 / 160)),
+                          float(float(data['pixel_size'][0][1])* (120 / 160)),
+                          float(data['pixel_size'][0][2])
+                         ]
+            data['pixel_size'][0] = pixel_size
+        else:
+            for ii in range(len(data[k])):
+                img = crop_or_pad_slice_to_size(data[k][ii], 120,120)
+                img = cv2.resize(img, (160, 160), interpolation=cv2.INTER_CUBIC)
+                data[k][ii] = img
+    data.close()
+'''
