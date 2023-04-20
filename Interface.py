@@ -59,14 +59,16 @@ def draw(img, image_binary):
         return former_x,former_y
     return paint_draw
     
-def imfill(img, dim):
-    img = img[:,:,0]
-    img = cv2.resize(img, (dim, dim))
-    img[img>0]=255
+def imfill(img, dim=None):
+    if len(img.shape) == 3:
+        img = img[:, :, 0]
+    if dim:
+        img = cv2.resize(img, (dim, dim))
+    img[img > 0] = 255
     im_floodfill = img.copy()
     h, w = im_floodfill.shape[:2]
     mask = np.zeros((h+2, w+2), np.uint8)
-    cv2.floodFill(im_floodfill, mask, (0,0), 255);
+    cv2.floodFill(im_floodfill, mask, (0, 0), 255);
     return img | cv2.bitwise_not(im_floodfill)
 
 def plot_img(grid_file, grid_mask, n_ph=0, n_sl=0, alpha=1, beta=1):
@@ -111,6 +113,13 @@ def delete(grid_mask, n_ph=None, n_sl=None, struc=None):
             for i in struc:
                 mask = grid_mask[str(n_ph)][0][n_sl].astype(np.uint8)
                 mask[mask == i] = 0
+                if struc == 3 and np.sum(mask[mask == 2]) != 0:
+                    mask_MYO = mask.copy()
+                    mask_MYO[mask_MYO == 1] = 0
+                    mask_MYO = imfill(mask_MYO, mask.shape[0])
+                    mask_MYO[mask_MYO!=0]=2
+                    mask[mask==2]=0
+                    mask = mask+mask_MYO
                 grid_mask[str(n_ph)][0][n_sl] = mask
         else:
             for n in range(len(grid_mask[str(n_ph)][0][:])):
