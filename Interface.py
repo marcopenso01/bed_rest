@@ -1,6 +1,5 @@
 """
 Created on Tue Apr 11 09:08:20 2023
-
 @author: Marco Penso
 """
 import numpy as np
@@ -45,15 +44,15 @@ def draw(img, image_binary):
         elif event==cv2.EVENT_MOUSEMOVE:
             if drawing==True:
                 if mode==True:
-                    cv2.line(img,(current_former_x,current_former_y),(former_x,former_y),(255,255,255),2)
-                    cv2.line(image_binary,(current_former_x,current_former_y),(former_x,former_y),(255,255,255),2)
+                    cv2.line(img,(current_former_x,current_former_y),(former_x,former_y),(255,255,255),1)
+                    cv2.line(image_binary,(current_former_x,current_former_y),(former_x,former_y),(255,255,255),1)
                     current_former_x = former_x
                     current_former_y = former_y
         elif event==cv2.EVENT_LBUTTONUP:
             drawing=False
             if mode==True:
-                cv2.line(img,(current_former_x,current_former_y),(former_x,former_y),(255,255,255),2)
-                cv2.line(image_binary,(current_former_x,current_former_y),(former_x,former_y),(255,255,255),2)
+                cv2.line(img,(current_former_x,current_former_y),(former_x,former_y),(255,255,255),1)
+                cv2.line(image_binary,(current_former_x,current_former_y),(former_x,former_y),(255,255,255),1)
                 current_former_x = former_x
                 current_former_y = former_y
         return former_x,former_y
@@ -113,7 +112,7 @@ def delete(grid_mask, n_ph=None, n_sl=None, struc=None):
             for i in struc:
                 mask = grid_mask[str(n_ph)][0][n_sl].astype(np.uint8)
                 mask[mask == i] = 0
-                if struc == 3 and np.sum(mask[mask == 2]) != 0:
+                if i == 3 and (np.sum(mask[mask == 2]) != 0):
                     mask_MYO = mask.copy()
                     mask_MYO[mask_MYO == 1] = 0
                     mask_MYO = imfill(mask_MYO, mask.shape[0])
@@ -126,6 +125,13 @@ def delete(grid_mask, n_ph=None, n_sl=None, struc=None):
                 for i in struc:
                     mask = grid_mask[str(n_ph)][0][n].astype(np.uint8)
                     mask[mask == i] = 0
+                    if i == 3 and (np.sum(mask[mask == 2]) != 0):
+                        mask_MYO = mask.copy()
+                        mask_MYO[mask_MYO == 1] = 0
+                        mask_MYO = imfill(mask_MYO, mask.shape[0])
+                        mask_MYO[mask_MYO!=0]=2
+                        mask[mask==2]=0
+                        mask = mask+mask_MYO
                     grid_mask[str(n_ph)][0][n] = mask
         return grid_mask
     except:   
@@ -289,7 +295,7 @@ def volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=None, n_ph=None, n
             LV_vol[str(n_ph)][n_sl] = vol
     return LV_vol, RV_vol, Myo_vol
 
-def del_volume(LV_vol, RV_vol, Myo_vol, struc=None, n_ph=None, n_sl=None):
+def del_volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=None, n_ph=None, n_sl=None):
     try:
         if n_sl != None:
             for i in struc:
@@ -299,6 +305,10 @@ def del_volume(LV_vol, RV_vol, Myo_vol, struc=None, n_ph=None, n_sl=None):
                     Myo_vol[str(n_ph)][n_sl] = 0
                 if i==3:
                     LV_vol[str(n_ph)][n_sl] = 0
+                    mask = grid_mask[str(n_ph)][0][n_sl].astype(np.uint8)
+                    if np.sum(mask[mask == 2]) != 0:
+                        LV_vol, RV_vol, Myo_vol = volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[2], n_ph=n_ph, n_sl=n_sl)
+                        
         else:
             for n in range(len(LV_vol[str(n_ph)][:])):
                 for i in struc:
@@ -308,6 +318,10 @@ def del_volume(LV_vol, RV_vol, Myo_vol, struc=None, n_ph=None, n_sl=None):
                         Myo_vol[str(n_ph)][n] = 0
                     if i==3:
                         LV_vol[str(n_ph)][n] = 0
+                        mask = grid_mask[str(n_ph)][0][n].astype(np.uint8)
+                        if np.sum(mask[mask == 2]) != 0:
+                            LV_vol, RV_vol, Myo_vol = volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[2], n_ph=n_ph, n_sl=n)
+        
         return LV_vol, RV_vol, Myo_vol
     except:   
         pass
@@ -612,7 +626,7 @@ def main():
             img = array_to_data(img)
             window["-IMAGE-"].update(data=img)
             window["-message-"].update(value=str(''))
-            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, struc=[1,2,3], n_ph=n_ph, n_sl=n_sl)
+            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[1,2,3], n_ph=n_ph, n_sl=n_sl)
             vol_info(window, LV_vol, RV_vol, Myo_vol, flag_ph, n_ph=n_ph, n_sl=n_sl)
         
         if event == 'Delete (Slice): SAX LV Endocardial Contour':
@@ -622,7 +636,7 @@ def main():
             img = array_to_data(img)
             window["-IMAGE-"].update(data=img)
             window["-message-"].update(value=str(''))
-            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, struc=[3], n_ph=n_ph, n_sl=n_sl)
+            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[3], n_ph=n_ph, n_sl=n_sl)
             vol_info(window, LV_vol, RV_vol, Myo_vol, flag_ph, n_ph=n_ph, n_sl=n_sl)
         
         if event == 'Delete (Slice): SAX LV Epicardial Contour':
@@ -632,7 +646,7 @@ def main():
             img = array_to_data(img)
             window["-IMAGE-"].update(data=img)
             window["-message-"].update(value=str(''))
-            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, struc=[2], n_ph=n_ph, n_sl=n_sl)
+            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[2], n_ph=n_ph, n_sl=n_sl)
             vol_info(window, LV_vol, RV_vol, Myo_vol, flag_ph, n_ph=n_ph, n_sl=n_sl)
         
         if event == 'Delete (Slice): SAX RV Endocardial Contour':
@@ -642,7 +656,7 @@ def main():
             img = array_to_data(img)
             window["-IMAGE-"].update(data=img)
             window["-message-"].update(value=str(''))
-            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, struc=[1], n_ph=n_ph, n_sl=n_sl)
+            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[1], n_ph=n_ph, n_sl=n_sl)
             vol_info(window, LV_vol, RV_vol, Myo_vol, flag_ph, n_ph=n_ph, n_sl=n_sl)
         
         if event == 'Delete All Contour (Phase)':
@@ -652,7 +666,7 @@ def main():
             img = array_to_data(img)
             window["-IMAGE-"].update(data=img)
             window["-message-"].update(value=str(''))
-            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, struc=[1,2,3], n_ph=n_ph)
+            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[1,2,3], n_ph=n_ph)
             vol_info(window, LV_vol, RV_vol, Myo_vol, flag_ph, n_ph=n_ph, n_sl=n_sl)
         
         if event == 'Delete (Phase): SAX LV Endocardial Contour':
@@ -662,7 +676,7 @@ def main():
             img = array_to_data(img)
             window["-IMAGE-"].update(data=img)
             window["-message-"].update(value=str(''))
-            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, struc=[3], n_ph=n_ph)
+            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[3], n_ph=n_ph)
             vol_info(window, LV_vol, RV_vol, Myo_vol, flag_ph, n_ph=n_ph, n_sl=n_sl)
         
         if event == 'Delete (Phase): SAX LV Epicardial Contour':
@@ -672,7 +686,7 @@ def main():
             img = array_to_data(img)
             window["-IMAGE-"].update(data=img)
             window["-message-"].update(value=str(''))
-            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, struc=[2], n_ph=n_ph)
+            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[2], n_ph=n_ph)
             vol_info(window, LV_vol, RV_vol, Myo_vol, flag_ph, n_ph=n_ph, n_sl=n_sl)
         
         if event == 'Delete (Phase): SAX RV Endocardial Contour':
@@ -682,7 +696,7 @@ def main():
             img = array_to_data(img)
             window["-IMAGE-"].update(data=img)
             window["-message-"].update(value=str(''))
-            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, struc=[1], n_ph=n_ph)
+            LV_vol, RV_vol, Myo_vol = del_volume(LV_vol, RV_vol, Myo_vol, grid_mask, px_size, struc=[1], n_ph=n_ph)
             vol_info(window, LV_vol, RV_vol, Myo_vol, flag_ph, n_ph=n_ph, n_sl=n_sl)
             
         if event == 'Reset Default Window':
@@ -766,6 +780,7 @@ def main():
             mask_LV = grid_mask[str(n_ph)][0][n_sl].copy()
             mask_RV[mask_RV != 1] = 0
             mask_LV[mask_LV != 3] = 0
+            im_out[mask_LV !=0] = 0
             final_mask = im_out + mask_RV + mask_LV
             m_rv = mask_RV.copy()
             m_lv = mask_LV.copy()
@@ -821,7 +836,7 @@ def main():
             img = array_to_data(img)
             window["-IMAGE-"].update(data=img)
             window["-message-"].update(value=str(''))
-            LV_vol,RV_vol,Myo_vol = volume(LV_vol,RV_vol,Myo_vol,grid_mask,px_size,[3],n_ph,n_sl)
+            LV_vol,RV_vol,Myo_vol = volume(LV_vol,RV_vol,Myo_vol,grid_mask,px_size,[2,3],n_ph,n_sl)
             vol_info(window, LV_vol, RV_vol, Myo_vol, flag_ph, n_ph=n_ph, n_sl=n_sl)
                 
         if event == 'Save':
